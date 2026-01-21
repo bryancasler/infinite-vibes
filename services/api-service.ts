@@ -123,10 +123,10 @@ export class ApiService {
 
     try {
       // Dynamically import the Google GenAI SDK
-      const { GoogleGenAI } = await import('@google/generative-ai');
+      const { GoogleGenerativeAI } = await import('@google/generative-ai');
 
       // Create a new client instance each time to pick up latest API key
-      this.client = new GoogleGenAI({ apiKey });
+      this.client = new GoogleGenerativeAI(apiKey);
 
       // Get the live model
       const model = (this.client as { live: { get: (config: Record<string, unknown>) => Promise<unknown> } }).live;

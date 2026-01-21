@@ -24,7 +24,7 @@ export class InactivityService {
   private lastActivityTime: number = Date.now();
   private isActive = true;
   private isEnabled = true;
-  private timeoutDuration = UI_CONFIG.INACTIVITY_TIMEOUT;
+  private timeoutDuration: number = UI_CONFIG.INACTIVITY_TIMEOUT;
 
   private eventListeners: Set<InactivityEventCallback> = new Set();
 
