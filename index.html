@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Infinite Vibes DJ</title>
+  <link rel="stylesheet" href="./index.css">
+
+  <!-- Import maps for ES modules via esm.sh -->
+  <script type="importmap">
+    {
+      "imports": {
+        "lit": "https://esm.sh/lit@3.1.0",
+        "lit/decorators.js": "https://esm.sh/lit@3.1.0/decorators.js",
+        "lit/directives/class-map.js": "https://esm.sh/lit@3.1.0/directives/class-map.js",
+        "lit/directives/style-map.js": "https://esm.sh/lit@3.1.0/directives/style-map.js",
+        "lit/directives/repeat.js": "https://esm.sh/lit@3.1.0/directives/repeat.js",
+        "@google/generative-ai": "https://esm.sh/@google/generative-ai@0.21.0"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="app-root">
+    <prompt-dj></prompt-dj>
+  </div>
+
+  <script type="module" src="./dist/index.js"></script>
+</body>
+</html>
