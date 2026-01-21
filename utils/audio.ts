@@ -80,7 +80,8 @@ export function createAudioBuffer(
   );
 
   // Copy data to the audio buffer's channel
-  audioBuffer.copyToChannel(data, 0);
+  const channelData = audioBuffer.getChannelData(0);
+  channelData.set(data);
 
   return audioBuffer;
 }

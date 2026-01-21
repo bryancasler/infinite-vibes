@@ -362,7 +362,7 @@ export class PromptDJ extends LitElement {
 
   @state() private prompts: Prompt[] = [];
   @state() private playbackState: PlaybackState = 'stopped';
-  @state() private isConnected = false;
+  @state() private apiConnected = false;
   @state() private uiState: UIState = {
     showSettings: false,
     showChat: false,
@@ -387,7 +387,7 @@ export class PromptDJ extends LitElement {
     // Load initial state
     this.prompts = this.orchestrator.getPrompts();
     this.playbackState = this.orchestrator.getPlaybackState();
-    this.isConnected = this.orchestrator.getIsConnected();
+    this.apiConnected = this.orchestrator.getIsConnected();
     this.uiState = this.orchestrator.getUIState();
     this.settings = this.orchestrator.getSettings();
     this.visualizerConfig = this.orchestrator.getVisualizerConfig();
@@ -437,7 +437,7 @@ export class PromptDJ extends LitElement {
 
   private handleConnectionChanged = (event: OrchestratorEvent): void => {
     const data = event.data as { connected: boolean };
-    this.isConnected = data.connected;
+    this.apiConnected = data.connected;
   };
 
   private handleUIStateChanged = (event: OrchestratorEvent): void => {
@@ -526,13 +526,13 @@ export class PromptDJ extends LitElement {
 
   private getConnectionStatus(): string {
     if (this.playbackState === 'connecting') return 'Connecting...';
-    if (this.isConnected) return 'Connected';
+    if (this.apiConnected) return 'Connected';
     return 'Disconnected';
   }
 
   private getConnectionClass(): string {
     if (this.playbackState === 'connecting') return 'connecting';
-    if (this.isConnected) return 'connected';
+    if (this.apiConnected) return 'connected';
     return '';
   }
 
@@ -642,7 +642,7 @@ export class PromptDJ extends LitElement {
             <div class="playback-section">
               <playback-controls
                 .playbackState=${this.playbackState}
-                .isConnected=${this.isConnected}
+                .isConnected=${this.apiConnected}
               ></playback-controls>
             </div>
           </div>
