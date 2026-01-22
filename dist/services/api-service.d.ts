@@ -57,6 +57,14 @@ export declare class ApiService {
      */
     private handleWebSocketMessage;
     /**
+     * Handles binary Blob messages (raw audio data)
+     */
+    private handleBlobMessage;
+    /**
+     * Converts ArrayBuffer to base64 string
+     */
+    private arrayBufferToBase64;
+    /**
      * Handles disconnection
      */
     private handleDisconnect;

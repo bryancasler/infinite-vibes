@@ -231,6 +231,13 @@ export class ApiService {
    * Handles incoming WebSocket messages
    */
   private handleWebSocketMessage(event: MessageEvent): void {
+    // Handle binary Blob data (audio)
+    if (event.data instanceof Blob) {
+      this.handleBlobMessage(event.data);
+      return;
+    }
+
+    // Handle text JSON messages
     try {
       const message = JSON.parse(event.data);
 
@@ -246,7 +253,7 @@ export class ApiService {
 
         if (modelTurn?.parts) {
           for (const part of modelTurn.parts) {
-            // Handle inline audio data
+            // Handle inline audio data (base64 encoded)
             if (part.inlineData) {
               const { mimeType, data } = part.inlineData;
               if (mimeType?.startsWith('audio/')) {
@@ -277,8 +284,75 @@ export class ApiService {
       }
 
     } catch (error) {
-      console.error('Failed to parse WebSocket message:', error);
+      console.error('Failed to parse WebSocket message:', error, event.data);
     }
+  }
+
+  /**
+   * Handles binary Blob messages (raw audio data)
+   */
+  private async handleBlobMessage(blob: Blob): Promise<void> {
+    try {
+      // Try to read as text first (might be JSON wrapped in Blob)
+      const text = await blob.text();
+
+      try {
+        const message = JSON.parse(text);
+
+        // Handle setup complete
+        if (message.setupComplete) {
+          console.log('Gemini Live API setup complete');
+          return;
+        }
+
+        // Handle server content
+        if (message.serverContent) {
+          const { modelTurn, turnComplete } = message.serverContent;
+
+          if (modelTurn?.parts) {
+            for (const part of modelTurn.parts) {
+              if (part.inlineData) {
+                const { mimeType, data } = part.inlineData;
+                if (mimeType?.startsWith('audio/')) {
+                  this.emit({ type: 'audio', data });
+                }
+              }
+              if (part.text) {
+                this.emit({ type: 'text', data: part.text });
+              }
+            }
+          }
+
+          if (turnComplete) {
+            console.log('Model turn complete');
+          }
+        }
+
+        if (message.error) {
+          console.error('API error:', message.error);
+          this.emit({ type: 'error', error: message.error.message || 'Unknown API error' });
+        }
+      } catch {
+        // Not JSON - treat as raw PCM audio data
+        const arrayBuffer = await blob.arrayBuffer();
+        const base64 = this.arrayBufferToBase64(arrayBuffer);
+        this.emit({ type: 'audio', data: base64 });
+      }
+    } catch (error) {
+      console.error('Failed to handle blob message:', error);
+    }
+  }
+
+  /**
+   * Converts ArrayBuffer to base64 string
+   */
+  private arrayBufferToBase64(buffer: ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
   }
 
   /**
