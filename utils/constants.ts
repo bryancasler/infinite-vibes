@@ -16,8 +16,8 @@ import type {
 // ============================================================================
 
 export const API_CONFIG = {
-  MODEL: 'gemini-2.5-flash-preview-native-audio-dialog',
-  AUDIO_MODEL: 'gemini-2.5-flash-preview-native-audio-dialog',
+  MODEL: 'gemini-2.0-flash-exp',
+  AUDIO_MODEL: 'gemini-2.0-flash-exp',
   CHAT_MODEL: 'gemini-2.0-flash',
   IMAGE_MODEL: 'imagen-3.0-generate-002',
   RECONNECT_DELAY: 2000,
