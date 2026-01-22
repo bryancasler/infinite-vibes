@@ -252,8 +252,8 @@ let ApiKeyDialog = class ApiKeyDialog extends LitElement {
             this.error = 'This doesn\'t look like a valid API key';
             return;
         }
-        // Save to localStorage
-        localStorage.setItem('infinite-vibes-api-key', this.apiKey.trim());
+        // Save to localStorage (JSON encoded to match storage utility expectations)
+        localStorage.setItem('infinite-vibes-api-key', JSON.stringify(this.apiKey.trim()));
         // Dispatch event
         this.dispatchEvent(new CustomEvent('api-key-saved', {
             bubbles: true,
