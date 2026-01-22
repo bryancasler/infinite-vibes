@@ -3,8 +3,8 @@
  */
 import type { GenerationSettings, VisualizerConfig, StorageKeys, InspirationPreset, MusicalKey, MusicalScale } from '../types.js';
 export declare const API_CONFIG: {
-    readonly MODEL: "gemini-2.5-flash-preview-native-audio-dialog";
-    readonly AUDIO_MODEL: "gemini-2.5-flash-preview-native-audio-dialog";
+    readonly MODEL: "gemini-2.0-flash-exp";
+    readonly AUDIO_MODEL: "gemini-2.0-flash-exp";
     readonly CHAT_MODEL: "gemini-2.0-flash";
     readonly IMAGE_MODEL: "imagen-3.0-generate-002";
     readonly RECONNECT_DELAY: 2000;
