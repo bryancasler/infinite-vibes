@@ -7,6 +7,9 @@ import type { ApiConnectionState, LiveApiConfig, GenerationSettings, Prompt } fr
 import { API_CONFIG, SYSTEM_INSTRUCTION, AUDIO_CONFIG } from '../utils/constants.js';
 import { getApiKey } from '../utils/storage.js';
 
+// Gemini Live API WebSocket endpoint
+const GEMINI_LIVE_WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
+
 // Event types for the API service
 export type ApiEventType =
   | 'connected'
@@ -25,13 +28,12 @@ export interface ApiEvent {
 type ApiEventCallback = (event: ApiEvent) => void;
 
 /**
- * Singleton service for managing Gemini Live API connection
+ * Singleton service for managing Gemini Live API connection via WebSocket
  */
 export class ApiService {
   private static instance: ApiService;
 
-  private client: unknown = null;
-  private session: unknown = null;
+  private ws: WebSocket | null = null;
   private connectionState: ApiConnectionState = {
     connected: false,
     connecting: false,
@@ -43,6 +45,8 @@ export class ApiService {
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
   private eventListeners: Map<ApiEventType, Set<ApiEventCallback>> = new Map();
+  private setupComplete = false;
+  private currentConfig: Partial<LiveApiConfig> | null = null;
 
   private constructor() {
     // Initialize event listener sets
@@ -104,12 +108,12 @@ export class ApiService {
   }
 
   /**
-   * Connects to the Gemini Live API
+   * Connects to the Gemini Live API via WebSocket
    */
   async connect(config?: Partial<LiveApiConfig>): Promise<boolean> {
     if (this.connectionState.connected || this.connectionState.connecting) {
       console.warn('Already connected or connecting');
-      return false;
+      return this.connectionState.connected;
     }
 
     const apiKey = getApiKey();
@@ -120,169 +124,161 @@ export class ApiService {
 
     this.connectionState.connecting = true;
     this.connectionState.error = null;
+    this.setupComplete = false;
+    this.currentConfig = config || null;
 
-    try {
-      // Dynamically import the Google GenAI SDK
-      const { GoogleGenerativeAI } = await import('@google/generative-ai');
+    return new Promise((resolve) => {
+      try {
+        // Connect to WebSocket with API key
+        const wsUrl = `${GEMINI_LIVE_WS_URL}?key=${apiKey}`;
+        this.ws = new WebSocket(wsUrl);
 
-      // Create a new client instance each time to pick up latest API key
-      this.client = new GoogleGenerativeAI(apiKey);
+        this.ws.onopen = () => {
+          console.log('WebSocket connected to Gemini Live API');
+          this.connectionState.connecting = false;
+          this.connectionState.connected = true;
+          this.connectionState.sessionId = `session-${Date.now()}`;
+          this.reconnectAttempts = 0;
 
-      // Get the live model
-      const model = (this.client as { live: { get: (config: Record<string, unknown>) => Promise<unknown> } }).live;
+          // Send setup message
+          this.sendSetupMessage(config);
+        };
 
-      if (!model) {
-        throw new Error('Live API not available in this SDK version');
+        this.ws.onmessage = (event) => {
+          this.handleWebSocketMessage(event);
+
+          // Resolve on first successful message (setup complete)
+          if (!this.setupComplete) {
+            this.setupComplete = true;
+            this.emit({ type: 'connected' });
+            this.emit({ type: 'setup-complete' });
+            this.startHeartbeat();
+            resolve(true);
+          }
+        };
+
+        this.ws.onerror = (error) => {
+          console.error('WebSocket error:', error);
+          this.connectionState.error = 'WebSocket connection error';
+          this.emit({ type: 'error', error: 'WebSocket connection error' });
+
+          if (!this.setupComplete) {
+            resolve(false);
+          }
+        };
+
+        this.ws.onclose = (event) => {
+          console.log('WebSocket closed:', event.code, event.reason);
+          this.handleDisconnect();
+
+          if (!this.setupComplete) {
+            resolve(false);
+          }
+        };
+
+        // Timeout for connection
+        setTimeout(() => {
+          if (!this.setupComplete && this.connectionState.connecting) {
+            console.error('Connection timeout');
+            this.ws?.close();
+            this.connectionState.connecting = false;
+            this.emit({ type: 'error', error: 'Connection timeout' });
+            resolve(false);
+          }
+        }, 30000);
+
+      } catch (error) {
+        console.error('Failed to connect to Gemini Live API:', error);
+        this.connectionState.connecting = false;
+        this.connectionState.error = error instanceof Error ? error.message : 'Connection failed';
+        this.emit({ type: 'error', error: this.connectionState.error });
+        this.scheduleReconnect();
+        resolve(false);
       }
+    });
+  }
 
-      // Configure the session
-      const sessionConfig = {
-        model: config?.model || API_CONFIG.MODEL,
-        systemInstruction: config?.systemInstruction || SYSTEM_INSTRUCTION,
+  /**
+   * Sends the initial setup message to configure the session
+   */
+  private sendSetupMessage(config?: Partial<LiveApiConfig>): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+
+    const setupMessage = {
+      setup: {
+        model: `models/${config?.model || API_CONFIG.MODEL}`,
         generationConfig: {
-          temperature: config?.generationConfig?.temperature ?? 1.0,
-          topK: config?.generationConfig?.topK ?? 40,
-          topP: config?.generationConfig?.topP ?? 0.95,
           responseModalities: ['AUDIO'],
-        },
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: {
-              voiceName: 'Aoede',
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: 'Aoede',
+              },
             },
           },
         },
-      };
+        systemInstruction: {
+          parts: [{ text: config?.systemInstruction || SYSTEM_INSTRUCTION }],
+        },
+      },
+    };
 
-      // Connect to the live session
-      this.session = await model.get(sessionConfig);
-
-      // Set up message handlers
-      this.setupSessionHandlers();
-
-      // Start heartbeat
-      this.startHeartbeat();
-
-      this.connectionState.connected = true;
-      this.connectionState.connecting = false;
-      this.connectionState.sessionId = `session-${Date.now()}`;
-      this.reconnectAttempts = 0;
-
-      this.emit({ type: 'connected' });
-      this.emit({ type: 'setup-complete' });
-
-      return true;
-    } catch (error) {
-      console.error('Failed to connect to Gemini Live API:', error);
-
-      this.connectionState.connecting = false;
-      this.connectionState.error =
-        error instanceof Error ? error.message : 'Connection failed';
-
-      this.emit({
-        type: 'error',
-        error: this.connectionState.error,
-      });
-
-      // Attempt reconnection
-      this.scheduleReconnect();
-
-      return false;
-    }
+    this.ws.send(JSON.stringify(setupMessage));
+    console.log('Sent setup message:', setupMessage);
   }
 
   /**
-   * Sets up handlers for session messages
+   * Handles incoming WebSocket messages
    */
-  private setupSessionHandlers(): void {
-    if (!this.session) return;
+  private handleWebSocketMessage(event: MessageEvent): void {
+    try {
+      const message = JSON.parse(event.data);
 
-    const session = this.session as {
-      on?: (event: string, handler: (data: unknown) => void) => void;
-      onMessage?: (handler: (message: unknown) => void) => void;
-    };
+      // Handle setup complete
+      if (message.setupComplete) {
+        console.log('Gemini Live API setup complete');
+        return;
+      }
 
-    // Handle incoming messages
-    const messageHandler = (message: unknown) => {
-      this.handleMessage(message);
-    };
+      // Handle server content (audio/text responses)
+      if (message.serverContent) {
+        const { modelTurn, turnComplete } = message.serverContent;
 
-    // Try different event binding methods based on SDK version
-    if (typeof session.on === 'function') {
-      session.on('message', messageHandler);
-      session.on('audio', (data: unknown) => {
-        if (data && typeof data === 'object' && 'data' in data) {
-          this.emit({ type: 'audio', data: (data as { data: string }).data });
+        if (modelTurn?.parts) {
+          for (const part of modelTurn.parts) {
+            // Handle inline audio data
+            if (part.inlineData) {
+              const { mimeType, data } = part.inlineData;
+              if (mimeType?.startsWith('audio/')) {
+                this.emit({ type: 'audio', data });
+              }
+            }
+            // Handle text
+            if (part.text) {
+              this.emit({ type: 'text', data: part.text });
+            }
+          }
         }
-      });
-      session.on('error', (error: unknown) => {
-        this.handleError(error);
-      });
-      session.on('close', () => {
-        this.handleDisconnect();
-      });
-    } else if (typeof session.onMessage === 'function') {
-      session.onMessage(messageHandler);
-    }
-  }
 
-  /**
-   * Handles incoming messages from the API
-   */
-  private handleMessage(message: unknown): void {
-    if (!message || typeof message !== 'object') return;
-
-    const msg = message as {
-      serverContent?: {
-        modelTurn?: {
-          parts?: Array<{
-            inlineData?: { data: string; mimeType: string };
-            text?: string;
-          }>;
-        };
-      };
-      audio?: { data: string };
-      text?: string;
-      error?: string;
-    };
-
-    // Handle audio data
-    if (msg.serverContent?.modelTurn?.parts) {
-      for (const part of msg.serverContent.modelTurn.parts) {
-        if (part.inlineData?.data) {
-          this.emit({ type: 'audio', data: part.inlineData.data });
-        }
-        if (part.text) {
-          this.emit({ type: 'text', data: part.text });
+        if (turnComplete) {
+          console.log('Model turn complete');
         }
       }
+
+      // Handle tool calls (if any)
+      if (message.toolCall) {
+        console.log('Received tool call:', message.toolCall);
+      }
+
+      // Handle errors
+      if (message.error) {
+        console.error('API error:', message.error);
+        this.emit({ type: 'error', error: message.error.message || 'Unknown API error' });
+      }
+
+    } catch (error) {
+      console.error('Failed to parse WebSocket message:', error);
     }
-
-    // Handle direct audio/text properties
-    if (msg.audio?.data) {
-      this.emit({ type: 'audio', data: msg.audio.data });
-    }
-
-    if (msg.text) {
-      this.emit({ type: 'text', data: msg.text });
-    }
-
-    if (msg.error) {
-      this.emit({ type: 'error', error: msg.error });
-    }
-  }
-
-  /**
-   * Handles errors
-   */
-  private handleError(error: unknown): void {
-    const errorMessage =
-      error instanceof Error ? error.message : 'Unknown error';
-
-    console.error('API Error:', errorMessage);
-
-    this.connectionState.error = errorMessage;
-    this.emit({ type: 'error', error: errorMessage });
   }
 
   /**
@@ -290,13 +286,17 @@ export class ApiService {
    */
   private handleDisconnect(): void {
     this.connectionState.connected = false;
+    this.connectionState.connecting = false;
     this.connectionState.sessionId = null;
     this.stopHeartbeat();
+    this.ws = null;
 
     this.emit({ type: 'disconnected' });
 
-    // Attempt to reconnect
-    this.scheduleReconnect();
+    // Attempt to reconnect if we were previously connected
+    if (this.setupComplete) {
+      this.scheduleReconnect();
+    }
   }
 
   /**
@@ -308,16 +308,14 @@ export class ApiService {
       return;
     }
 
-    const delay =
-      API_CONFIG.RECONNECT_DELAY * Math.pow(2, this.reconnectAttempts);
+    const delay = API_CONFIG.RECONNECT_DELAY * Math.pow(2, this.reconnectAttempts);
     this.reconnectAttempts++;
 
-    console.log(
-      `Scheduling reconnect attempt ${this.reconnectAttempts} in ${delay}ms`
-    );
+    console.log(`Scheduling reconnect attempt ${this.reconnectAttempts} in ${delay}ms`);
 
     this.reconnectTimeout = setTimeout(() => {
-      this.connect();
+      this.setupComplete = false;
+      this.connect(this.currentConfig || undefined);
     }, delay);
   }
 
@@ -328,9 +326,9 @@ export class ApiService {
     this.stopHeartbeat();
 
     this.heartbeatInterval = setInterval(() => {
-      if (this.connectionState.connected) {
-        // Send a keep-alive ping
-        this.sendText('');
+      if (this.connectionState.connected && this.ws?.readyState === WebSocket.OPEN) {
+        // Send empty client content as keep-alive
+        this.sendClientContent('', false);
       }
     }, API_CONFIG.HEARTBEAT_INTERVAL);
   }
@@ -346,46 +344,45 @@ export class ApiService {
   }
 
   /**
-   * Sends text input to the API
+   * Sends client content to the API
    */
-  async sendText(text: string): Promise<boolean> {
-    if (!this.session || !this.connectionState.connected) {
-      console.warn('Cannot send: not connected');
+  private sendClientContent(text: string, turnComplete: boolean = true): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      console.warn('Cannot send: WebSocket not connected');
       return false;
     }
 
     try {
-      const session = this.session as {
-        send?: (input: unknown) => Promise<void>;
-        sendRealtimeInput?: (input: unknown) => Promise<void>;
-        sendClientContent?: (content: unknown) => Promise<void>;
+      const message = {
+        clientContent: {
+          turns: [
+            {
+              role: 'user',
+              parts: [{ text }],
+            },
+          ],
+          turnComplete,
+        },
       };
 
-      // Try different send methods based on SDK version
-      if (typeof session.send === 'function') {
-        await session.send({ text });
-      } else if (typeof session.sendRealtimeInput === 'function') {
-        await session.sendRealtimeInput({
-          clientContent: {
-            turns: [{ role: 'user', parts: [{ text }] }],
-            turnComplete: true,
-          },
-        });
-      } else if (typeof session.sendClientContent === 'function') {
-        await session.sendClientContent({
-          turns: [{ role: 'user', parts: [{ text }] }],
-          turnComplete: true,
-        });
-      } else {
-        throw new Error('No compatible send method found');
-      }
-
+      this.ws.send(JSON.stringify(message));
       return true;
     } catch (error) {
-      console.error('Failed to send text:', error);
-      this.handleError(error);
+      console.error('Failed to send client content:', error);
       return false;
     }
+  }
+
+  /**
+   * Sends text input to the API
+   */
+  async sendText(text: string): Promise<boolean> {
+    if (!this.connectionState.connected) {
+      console.warn('Cannot send: not connected');
+      return false;
+    }
+
+    return this.sendClientContent(text, true);
   }
 
   /**
@@ -456,19 +453,15 @@ export class ApiService {
 
     this.stopHeartbeat();
 
-    if (this.session) {
+    if (this.ws) {
       try {
-        const session = this.session as { close?: () => Promise<void> };
-        if (typeof session.close === 'function') {
-          await session.close();
-        }
+        this.ws.close(1000, 'Client disconnect');
       } catch (error) {
-        console.error('Error closing session:', error);
+        console.error('Error closing WebSocket:', error);
       }
-      this.session = null;
+      this.ws = null;
     }
 
-    this.client = null;
     this.connectionState = {
       connected: false,
       connecting: false,
@@ -476,6 +469,7 @@ export class ApiService {
       sessionId: null,
     };
     this.reconnectAttempts = 0;
+    this.setupComplete = false;
 
     this.emit({ type: 'disconnected' });
   }

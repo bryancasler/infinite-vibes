@@ -11,17 +11,18 @@ export interface ApiEvent {
 }
 type ApiEventCallback = (event: ApiEvent) => void;
 /**
- * Singleton service for managing Gemini Live API connection
+ * Singleton service for managing Gemini Live API connection via WebSocket
  */
 export declare class ApiService {
     private static instance;
-    private client;
-    private session;
+    private ws;
     private connectionState;
     private reconnectAttempts;
     private reconnectTimeout;
     private heartbeatInterval;
     private eventListeners;
+    private setupComplete;
+    private currentConfig;
     private constructor();
     /**
      * Gets the singleton instance
@@ -44,21 +45,17 @@ export declare class ApiService {
      */
     private emit;
     /**
-     * Connects to the Gemini Live API
+     * Connects to the Gemini Live API via WebSocket
      */
     connect(config?: Partial<LiveApiConfig>): Promise<boolean>;
     /**
-     * Sets up handlers for session messages
+     * Sends the initial setup message to configure the session
      */
-    private setupSessionHandlers;
+    private sendSetupMessage;
     /**
-     * Handles incoming messages from the API
+     * Handles incoming WebSocket messages
      */
-    private handleMessage;
-    /**
-     * Handles errors
-     */
-    private handleError;
+    private handleWebSocketMessage;
     /**
      * Handles disconnection
      */
@@ -75,6 +72,10 @@ export declare class ApiService {
      * Stops the heartbeat interval
      */
     private stopHeartbeat;
+    /**
+     * Sends client content to the API
+     */
+    private sendClientContent;
     /**
      * Sends text input to the API
      */
