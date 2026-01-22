@@ -71,9 +71,26 @@ export function clearAppStorage(): boolean {
 
 /**
  * Retrieves the stored API key
+ * Handles both raw strings (legacy) and JSON-encoded strings
  */
 export function getApiKey(): string | null {
-  return getStorageItem<string | null>(STORAGE_KEYS.API_KEY, null);
+  try {
+    const stored = localStorage.getItem(STORAGE_KEYS.API_KEY);
+    if (!stored) return null;
+
+    // Try parsing as JSON first (new format)
+    try {
+      return JSON.parse(stored) as string;
+    } catch {
+      // If JSON parse fails, it's a raw string (legacy format)
+      // Re-save it properly encoded for future use
+      setApiKey(stored);
+      return stored;
+    }
+  } catch (error) {
+    console.warn('Failed to retrieve API key:', error);
+    return null;
+  }
 }
 
 /**
