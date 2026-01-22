@@ -439,8 +439,21 @@ let PromptDJ = class PromptDJ extends LitElement {
         this.orchestrator.off('error', this.handleError);
     }
     checkApiKey() {
-        const apiKey = localStorage.getItem('infinite-vibes-api-key');
-        if (!apiKey) {
+        const stored = localStorage.getItem('infinite-vibes-api-key');
+        // Check if we have a valid stored API key (JSON encoded string)
+        if (!stored) {
+            this.showApiKeyDialog = true;
+            return;
+        }
+        try {
+            const apiKey = JSON.parse(stored);
+            if (!apiKey) {
+                this.showApiKeyDialog = true;
+            }
+        }
+        catch {
+            // Invalid JSON - clear and show dialog
+            localStorage.removeItem('infinite-vibes-api-key');
             this.showApiKeyDialog = true;
         }
     }

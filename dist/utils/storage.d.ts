@@ -21,6 +21,7 @@ export declare function removeStorageItem(key: string): boolean;
 export declare function clearAppStorage(): boolean;
 /**
  * Retrieves the stored API key
+ * Handles both raw strings (legacy) and JSON-encoded strings
  */
 export declare function getApiKey(): string | null;
 /**
